@@ -1,60 +1,171 @@
 #include <Arduino.h>
 
-#include "driver/gpio.h"
-#include "driver/twai.h"
+#include <WiFi.h>
+#include <SPIFFS.h>
+#include "ESPAsyncWebServer.h"
 
-//Initialize configuration structures using macro initializers
-twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(GPIO_NUM_21, GPIO_NUM_22, TWAI_MODE_NO_ACK);
-twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
-twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+#define LED_BUILTIN 4
 
+void writeFile(const char * path, String message);
+String readFile(const char * path);
 
-void setup() {
-    //Install TWAI driver
-    if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK) {
-        printf("Driver installed\n");
-    } else {
-        printf("Failed to install driver\n");
-        return;
-    }
+const char* ssid = "ESP32-Access-Point";
+const char* password = "123456789";
 
-    //Start TWAI driver
-    if (twai_start() == ESP_OK) {
-        printf("Driver started\n");
-    } else {
-        printf("Failed to start driver\n");
-        return;
-    }
+String html_request_upload ="<!DOCTYPE html>\
+<html>\
+<body>\
+  <h2>File Upload</h2>\
+  <form method=\"POST\" action=\"/upload\" enctype=\"multipart/form-data\">\
+    <input type=\"file\" name=\"upload\">\
+    <input type=\"submit\" value=\"Upload\">\
+  </form>\
+</body>\
+</html>\
+";
+
+String html_confirm_upload_ok ="<!DOCTYPE html>\
+<html>\
+<body>\
+  <h2>File Upload</h2>\
+  <form method=\"POST\" action=\"/upload\" enctype=\"multipart/form-data\">\
+    <input type=\"file\" name=\"upload\">\
+    <input type=\"submit\" value=\"Upload\">\
+  </form>\
+  <hr>\
+  <h2>File Upload OK</h2>\
+</body>\
+</html>\
+";
+
+String html_confirm_upload_failed ="<!DOCTYPE html>\
+<html>\
+<body>\
+  <h2>File Upload</h2>\
+  <form method=\"POST\" action=\"/upload\" enctype=\"multipart/form-data\">\
+    <input type=\"file\" name=\"upload\">\
+    <input type=\"submit\" value=\"Upload\">\
+  </form>\
+  <hr>\
+  <h2>File Upload Failed</h2>\
+</body>\
+</html>\
+";
+
+AsyncWebServer async_server(80);
+
+void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+{
+  String content = "";
+
+  for(size_t i = 0; i < len; i++)
+  {
+    content += (char)(data[i]);
+  }
+
+  writeFile("/hex_file.hex", content);
+  String file_content_from_memory = readFile("/hex_file.hex");
+  uint32_t file_from_memory_size = file_content_from_memory.length();
+
+  if ((content == file_content_from_memory) && (len == file_from_memory_size))
+  {
+    request->send(200, "text/html", html_confirm_upload_ok);
+  }
+  else
+  {
+    request->send(200, "text/html", html_confirm_upload_failed);
+  }
 }
 
+void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  // Initialize serial communication
+  Serial.begin(115200);
+
+  // Configure the ESP32 as an access point
+  WiFi.softAP(ssid, password);
+
+  // Print the IP address
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(IP);
+
+  async_server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/html", html_request_upload);
+  });
+
+
+  async_server.on("/upload", HTTP_POST, [](AsyncWebServerRequest *request){
+  }, handleUpload);
+
+  async_server.begin();
+
+  // Initialize SPIFFS
+  if (!SPIFFS.begin(true)) {
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }
+}
+
+
+
 void loop() {
+  Serial.println(".");
+  // digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+  delay(1000);
 
-    // Configure message to transmit
-    twai_message_t message;
-        // Message type and format settings
-    message.extd = 1;              // Standard vs extended format
-    message.rtr = 0;               // Data vs RTR frame
-    message.ss = 0;                // Whether the message is single shot (i.e.; does not repeat on error)
-    message.self = 0;              // Whether the message is a self reception request (loopback)
-    message.dlc_non_comp = 0;      // DLC is less than 8
-    // Message ID and payload
-    message.identifier = 0xAAAA;
-    message.data_length_code = 4;
-    message.data[0] = 0;
-    message.data[1] = 1;
-    message.data[2] = 2;
-    message.data[3] = 3;
+  if (Serial.available() > 0)
+  {
+    String file_content_from_memory = readFile("/hex_file.hex");
+    uint32_t file_from_memory_size = file_content_from_memory.length();
 
-    //Queue message for transmission
-    if (twai_transmit(&message, pdMS_TO_TICKS(1000)) == ESP_OK) {
-        printf("Message queued for transmission\n");
-    } else {
-        printf("Failed to queue message for transmission\n");
+    for(uint32_t i = 0; i < file_from_memory_size; i++)
+    {
+      Serial.print(file_content_from_memory[i], HEX);
+      Serial.print('\t');
+      if ((i % 16) == 0)
+      {
+        Serial.println();
+      }
     }
 
-    delay(1000);
+    while((Serial.available() > 0))
+    {
+      Serial.read();
+    }
+  }
+}
 
-    twai_status_info_t status_info;
-    twai_get_status_info(&status_info);
-    printf("state: %d\n", status_info.state);
+
+
+void writeFile(const char * path, String message) {
+  File file = SPIFFS.open(path, FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open file for writing");
+    return;
+  }
+  if (file.print(message)) {
+    Serial.println("File written successfully");
+  } else {
+    Serial.println("Write failed");
+  }
+  file.close();
+}
+
+
+String readFile(const char * path) {
+  String ret;
+  File file = SPIFFS.open(path, FILE_READ);
+  if (!file) {
+    Serial.println("Failed to open file for reading");
+    return "";
+  }
+  
+  while (file.available()) {
+    ret = file.readString();
+  }
+  file.close();
+
+  return ret;
 }
