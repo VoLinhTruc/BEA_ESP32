@@ -1,0 +1,202 @@
+#include <Arduino.h>
+
+#include <WiFi.h>
+#include <SPIFFS.h>
+
+void writeFile(const char * path, String message);
+String readFile(const char * path);
+
+
+const char* ssid = "ESP32-Access-Point";
+const char* password = "123456789";
+
+String html_request_upload ="<!DOCTYPE html>\
+<html>\
+<body>\
+  <h2>File Upload</h2>\
+  <form method=\"POST\" action=\"/upload\" enctype=\"multipart/form-data\">\
+    <input type=\"file\" name=\"upload\">\
+    <input type=\"submit\" value=\"Upload\">\
+  </form>\
+</body>\
+</html>\
+";
+
+String html_confirm_upload_ok ="<!DOCTYPE html>\
+<html>\
+<body>\
+  <h2>File Upload OK</h2>\
+</body>\
+</html>\
+";
+
+String html_confirm_upload_failed ="<!DOCTYPE html>\
+<html>\
+<body>\
+  <h2>File Upload Failed</h2>\
+</body>\
+</html>\
+";
+
+WiFiServer server(80);
+
+
+
+void setup() {
+  // Initialize serial communication
+  Serial.begin(115200);
+
+  // Configure the ESP32 as an access point
+  WiFi.softAP(ssid, password);
+
+  // Print the IP address
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(IP);
+
+  // Start the server
+  server.begin();
+
+  // Initialize SPIFFS
+  if (!SPIFFS.begin(true)) {
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }
+}
+
+
+
+void loop() {
+  Serial.println(".");
+  delay(1000);
+
+  WiFiClient client = server.available();
+
+  if (client) 
+  {        
+      String client_input = "";
+      uint8_t i = 0;
+      if (client.available())
+      {
+          client_input += client.readString();
+      }
+      // Serial.println(client_input);
+      
+      if (client_input.indexOf("/upload") != -1)
+      {
+        uint32_t boundary_code_start_index = client_input.indexOf("boundary=") + String("boundary=").length();
+        uint32_t boundary_code_stop_index = client_input.indexOf("\n", boundary_code_start_index);
+
+        String boundary_code = client_input.substring(boundary_code_start_index, boundary_code_stop_index);
+
+        uint32_t boundary_code_begin_start_index = client_input.indexOf(boundary_code, boundary_code_stop_index);
+
+        String file_info = client_input.substring(boundary_code_begin_start_index);
+        
+        uint32_t file_name_start_index = file_info.indexOf("filename=\"") + String("filename=\"").length();
+        uint32_t file_name_stop_index = file_info.indexOf("\"", file_name_start_index);
+
+        String file_name = file_info.substring(file_name_start_index, file_name_stop_index);
+
+        uint32_t file_content_start_index = file_info.indexOf("Content-Type: application/octet-stream") + String("Content-Type: application/octet-stream").length() + 4;
+        uint32_t file_content_stop_index = file_info.length() - boundary_code.length() - 7; 
+
+        String file_content = file_info.substring(file_content_start_index, file_content_stop_index);
+        uint32_t file_size = file_content.length();
+        
+        writeFile("/hex_file.hex", file_content);
+        String file_content_from_memory = readFile("/hex_file.hex");
+        uint32_t file_from_memory_size = file_content_from_memory.length();
+
+        // Serial.println("******************");
+        // Serial.println(file_content);
+        // Serial.println(file_size);
+        // Serial.println("******************");
+        // Serial.println(file_content_from_memory);
+        // Serial.println(file_from_memory_size);
+
+        if ((file_content == file_content_from_memory) && (file_size == file_from_memory_size))
+        {
+          Serial.println("New Client request");
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-type:text/html");
+          client.println();
+          client.println(html_confirm_upload_ok);
+          client.println();
+        }
+        else
+        {
+          Serial.println("New Client request");
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-type:text/html");
+          client.println();
+          client.println(html_confirm_upload_failed);
+          client.println();
+        }
+      }
+      else
+      {
+        Serial.println("New Client request");
+        client.println("HTTP/1.1 200 OK");
+        client.println("Content-type:text/html");
+        client.println();
+        client.println(html_request_upload);
+        client.println();
+      }
+  }
+
+
+  if (Serial.available() > 0)
+  {
+    String file_content_from_memory = readFile("/hex_file.hex");
+    uint32_t file_from_memory_size = file_content_from_memory.length();
+
+    for(uint32_t i = 0; i < file_from_memory_size; i++)
+    {
+      Serial.print(file_content_from_memory[i], HEX);
+      Serial.print('\t');
+      if ((i % 16) == 0)
+      {
+        Serial.println();
+      }
+    }
+
+    while((Serial.available() > 0))
+    {
+      Serial.read();
+    }
+  }
+}
+
+
+
+void writeFile(const char * path, String message) {
+  File file = SPIFFS.open(path, FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open file for writing");
+    return;
+  }
+  if (file.print(message)) {
+    Serial.println("File written successfully");
+  } else {
+    Serial.println("Write failed");
+  }
+  file.close();
+}
+
+
+String readFile(const char * path) {
+  String ret;
+  File file = SPIFFS.open(path, FILE_READ);
+  if (!file) {
+    Serial.println("Failed to open file for reading");
+    return "";
+  }
+  
+  while (file.available()) {
+    ret = file.readString();
+  }
+  file.close();
+
+  return ret;
+}
