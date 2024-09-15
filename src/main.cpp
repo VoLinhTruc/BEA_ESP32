@@ -282,12 +282,18 @@ void flashingFile()
       {
         String file_content_from_memory = readFile("/bin_file.bin");
         uint32_t file_from_memory_size = file_content_from_memory.length();
-
-
-
-        Serial.println(file_from_memory_size);
+        
         for(uint32_t i = 0; i < file_from_memory_size; i+=4)
         {
+          Serial.print(file_content_from_memory[i], HEX);
+          Serial.print("\t");
+          Serial.print(file_content_from_memory[i+1], HEX);
+          Serial.print("\t");
+          Serial.print(file_content_from_memory[i+2], HEX);
+          Serial.print("\t");
+          Serial.print(file_content_from_memory[i+3], HEX);
+          Serial.println("\t");
+
           CAN.beginPacket(0x719);
           CAN.write(0x08); CAN.write(0x36); CAN.write(0x08);
           CAN.write(file_content_from_memory[i]);
@@ -295,8 +301,10 @@ void flashingFile()
           CAN.write(file_content_from_memory[i+2]);
           CAN.write(file_content_from_memory[i+3]);
           CAN.write(0x55);
-          CAN.endPacket();
-    
+          if (CAN.endPacket() == 0)
+          {
+            return;
+          }    
           delay(20);  
 
           // int received_packet_size = CAN.parsePacket();
@@ -369,41 +377,56 @@ void webClientHandling()
         String file_content = file_info.substring(file_content_start_index, file_content_stop_index);
         uint32_t file_size = file_content.length();
         
-        writeFile("/bin_file.bin", file_content);
-        String file_content_from_memory = readFile("/bin_file.bin");
-        uint32_t file_from_memory_size = file_content_from_memory.length();
-
-        // Serial.println("******************");
-        // Serial.println(file_size);
-        // for (int i = 0; i < file_size; i++)
-        // {
-        //   Serial.print(file_content[i], HEX);
-        //   Serial.print("\t");
-        //   if ((i%16) == 0)
-        //   {
-        //     Serial.println();
-        //   }
-        // }
-        // Serial.println("******************");
-        // Serial.println(file_from_memory_size);
-        // for (int i = 0; i < file_from_memory_size; i++)
-        // {
-        //   Serial.print(file_content_from_memory[i], HEX);
-        //   Serial.print("\t");
-        //   if ((i%16) == 0)
-        //   {
-        //     Serial.println();
-        //   }
-        // }
-
-        if ((file_content == file_content_from_memory) && (file_size == file_from_memory_size))
+        if (file_size > 0)
         {
-          Serial.println("New Client request");
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-type:text/html");
-          client.println();
-          client.println(html_confirm_upload_ok);
-          client.println();
+          writeFile("/bin_file.bin", file_content);
+          String file_content_from_memory = readFile("/bin_file.bin");
+          uint32_t file_from_memory_size = file_content_from_memory.length();
+
+          // Serial.println("******************");
+          // Serial.println(file_size);
+          // for (int i = 0; i < file_size; i++)
+          // {
+          //   Serial.print(file_content[i], HEX);
+          //   Serial.print("\t");
+          //   if ((i%16) == 0)
+          //   {
+          //     Serial.println();
+          //   }
+          // }
+          // Serial.println("******************");
+          // Serial.println(file_from_memory_size);
+          // for (int i = 0; i < file_from_memory_size; i++)
+          // {
+          //   Serial.print(file_content_from_memory[i], HEX);
+          //   Serial.print("\t");
+          //   if ((i%16) == 0)
+          //   {
+          //     Serial.println();
+          //   }
+          // }
+
+          if ((file_content == file_content_from_memory) && (file_size == file_from_memory_size))
+          {
+            Serial.println("New Client request");
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println();
+            client.println(html_confirm_upload_ok);
+            client.println();
+          }
+          else
+          {
+            Serial.println("New Client request");
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println();
+            client.println(html_confirm_upload_failed);
+            client.println();
+          }
+
+          printFile();
+          flashingFile();
         }
         else
         {
@@ -413,12 +436,6 @@ void webClientHandling()
           client.println();
           client.println(html_confirm_upload_failed);
           client.println();
-        }
-        
-        if (file_size > 0)
-        {
-          printFile();
-          flashingFile();
         }
       }
       else if (client_input.indexOf("/control") != -1)
