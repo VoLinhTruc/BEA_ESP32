@@ -4,6 +4,10 @@
 #include <CAN.h>
 #include "soc/soc.h"          // Disable brownout detector
 #include "soc/rtc_cntl_reg.h" // Required for RTC_CNTL_BROWN_OUT_REG
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 
 void writeFile(const char * path, String message);
@@ -12,7 +16,7 @@ void printFile();
 uint32_t fileCrcCal();
 void flashingFile();
 void webClientHandling();
-void vehicleControl(uint32_t direciton, uint32_t speed);
+void vehicleControl(int direciton, int speed);
 void dataToOled();
 
 
@@ -429,29 +433,30 @@ void webClientHandling()
           uint32_t substring_end_index = client_input.indexOf(" ", substring_start_index);
           String extracted_value = client_input.substring(substring_start_index, substring_end_index);
           // Serial.println(extracted_value);
-          static uint8_t direction = 0; // 0:up, 1:right, 2:down, 3:left
-          static uint8_t speed = 0;
+          static int8_t direction = 0; // 0:up, 1:right, 2:down, 3:left
+          static int8_t speed = 0;
           if (extracted_value == "up")
           {
             direction = 0;
           }
           else if (extracted_value == "right")
           {
-            direction = 1;
+            direction = 45;
           }
           else if (extracted_value == "down")
           {
-            direction = 2;
+            direction = 0;
           }
           else if (extracted_value == "left")
           {
-            direction = 3;
+            direction = -45;
           }
           else
           {
             speed = extracted_value.toInt();
           }
-          vehicleControl(direction, speed);
+          
+          vehicleControl(direction, speed * ((extracted_value == "down")? -1:1));
 
           Serial.print("Vehicle Control: ");
           Serial.println(extracted_value);
@@ -471,13 +476,19 @@ void webClientHandling()
 }
 
 
-void vehicleControl(uint32_t direciton, uint32_t speed)
+void vehicleControl(int direciton, int speed)
 {
     CAN.beginPacket(0x201);
     CAN.write(direciton);
     CAN.write((speed >> 0) & 0xFF);
     CAN.write((speed >> 8) & 0xFF);
     CAN.endPacket();
+
+    Serial.print("direciton: ");
+    Serial.print(direciton);
+    Serial.print("\t");
+    Serial.print("speed: ");
+    Serial.println(speed);
 }
 
 void dataToOled()
@@ -494,10 +505,14 @@ void dataToOled()
         data_index++;
       }
 
-      uint32_t direciton = data[0];
-      uint32_t speed = (((uint16_t)data[1]) << 8) | data[0];
+      int8_t direciton = data[0];
+      int16_t speed = (int16_t)((((uint16_t)data[1]) << 8) | data[2]);
 
-      
+      Serial.print("current direciton: ");
+      Serial.print(direciton);
+      Serial.print("\t");
+      Serial.print("current speed: ");
+      Serial.println(speed);
     }
   }
 }
