@@ -6,6 +6,14 @@
         "array": "cpp",
         "string": "cpp",
         "string_view": "cpp",
-        "*.tcc": "c"
+        "*.tcc": "c",
+        "optional": "cpp",
+        "istream": "cpp",
+        "ostream": "cpp",
+        "functional": "cpp",
+        "regex": "cpp",
+        "tuple": "cpp",
+        "type_traits": "cpp",
+        "utility": "cpp"
     }
 }

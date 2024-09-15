@@ -9,10 +9,10 @@
 void writeFile(const char * path, String message);
 String readFile(const char * path);
 void printFile();
+uint32_t fileCrcCal();
 void flashingFile();
 void webClientHandling();
-void steeringControl(uint32_t value);
-void speedControl(uint32_t value);
+void vehicleControl(uint32_t direciton, uint32_t speed);
 void dataToOled();
 
 
@@ -103,7 +103,7 @@ void setup() {
   server.begin();
 
   // start the CAN bus at 500 kbps
-  if (!CAN.begin(500E3)) {
+  if (!CAN.begin(1000E3)) {
     Serial.println("Starting CAN failed!");
     while (1);
   }
@@ -128,6 +128,9 @@ void loop() {
   if (Serial.available() > 0)
   {
     printFile();
+    flashingFile();
+    // Serial.println();
+    // Serial.println(fileCrcCal(), HEX);
 
     while((Serial.available() > 0))
     {
@@ -188,6 +191,30 @@ void printFile()
     Serial.println();
 }
 
+uint32_t fileCrcCal()
+{
+    uint32_t crc = 0xFFFFFFFF;  // Initial CRC value
+    uint32_t CRC_POLYNOMIAL = 0x04C11DB7;
+    
+    String file_content_from_memory = readFile("/bin_file.bin");
+    uint32_t file_from_memory_size = file_content_from_memory.length();
+
+    for(uint32_t i = 0; i < file_from_memory_size; i+=4)
+    {
+      uint32_t word =  (uint32_t)(*(uint32_t*)(file_content_from_memory.c_str() + i));
+
+      crc ^= word;
+      for (int j = 0; j < 32; j++) {
+          if (crc & 0x80000000) {
+              crc = (crc << 1) ^ CRC_POLYNOMIAL;
+          } else {
+              crc <<= 1;
+          }
+      }
+    }
+    return crc ^ 0xFFFFFFFF;  // Final XOR value
+}
+
 
 void flashingFile()
 {
@@ -195,6 +222,36 @@ void flashingFile()
     uint8_t reset_message[] = {0x07, 0x11, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55};
     CAN.beginPacket(0x719);
     CAN.write(reset_message, sizeof(reset_message));
+    CAN.endPacket();    
+    
+    delay(500);  
+
+    // Write firmware size
+    uint8_t wdbi_1001_message[] = {0x07, 0x2E, 0x10, 0x01, 0x55, 0x55, 0x55, 0x55};
+    uint32_t firmware_size = String(readFile("/bin_file.bin")).length();
+    Serial.print("firmware_size: ");
+    Serial.println(firmware_size);
+    wdbi_1001_message[4] = (firmware_size >> 0) & 0xFF; 
+    wdbi_1001_message[5] = (firmware_size >> 8) & 0xFF; 
+    wdbi_1001_message[6] = (firmware_size >> 16) & 0xFF; 
+    wdbi_1001_message[7] = (firmware_size >> 24) & 0xFF; 
+    CAN.beginPacket(0x719);
+    CAN.write(wdbi_1001_message, sizeof(wdbi_1001_message));
+    CAN.endPacket();    
+    
+    delay(500);  
+
+    // Write firmware crc
+    uint8_t wdbi_1002_message[] = {0x07, 0x2E, 0x10, 0x02, 0x55, 0x55, 0x55, 0x55};
+    uint32_t firmware_crc = fileCrcCal();
+    Serial.print("firmware_crc: ");
+    Serial.println(firmware_crc, HEX);
+    wdbi_1002_message[4] = (firmware_crc >> 0) & 0xFF; 
+    wdbi_1002_message[5] = (firmware_crc >> 8) & 0xFF; 
+    wdbi_1002_message[6] = (firmware_crc >> 16) & 0xFF; 
+    wdbi_1002_message[7] = (firmware_crc >> 24) & 0xFF; 
+    CAN.beginPacket(0x719);
+    CAN.write(wdbi_1002_message, sizeof(wdbi_1002_message));
     CAN.endPacket();    
     
     delay(500);  
@@ -221,6 +278,8 @@ void flashingFile()
       {
         String file_content_from_memory = readFile("/bin_file.bin");
         uint32_t file_from_memory_size = file_content_from_memory.length();
+
+
 
         Serial.println(file_from_memory_size);
         for(uint32_t i = 0; i < file_from_memory_size; i+=4)
@@ -354,8 +413,8 @@ void webClientHandling()
         
         if (file_size > 0)
         {
-          // flashingFile();
           printFile();
+          flashingFile();
         }
       }
       else if (client_input.indexOf("/control") != -1)
@@ -392,10 +451,9 @@ void webClientHandling()
           {
             speed = extracted_value.toInt();
           }
-          steeringControl(direction);
-          speedControl(speed);
+          vehicleControl(direction, speed);
 
-          Serial.print("Vehicle Control: ")
+          Serial.print("Vehicle Control: ");
           Serial.println(extracted_value);
       }
       else
@@ -413,27 +471,20 @@ void webClientHandling()
 }
 
 
-void steeringControl(uint32_t value)
+void vehicleControl(uint32_t direciton, uint32_t speed)
 {
-    CAN.beginPacket(0x719);
-    CAN.write(value);
+    CAN.beginPacket(0x201);
+    CAN.write(direciton);
+    CAN.write((speed >> 0) & 0xFF);
+    CAN.write((speed >> 8) & 0xFF);
     CAN.endPacket();
 }
-
-
-void speedControl(uint32_t value)
-{
-    CAN.beginPacket(0x719);
-    CAN.write(value);
-    CAN.endPacket();
-}
-
 
 void dataToOled()
 {
   if (CAN.parsePacket() && (CAN.packetId() != -1)) 
   {
-    if (CAN.packetId() == 0x123)
+    if (CAN.packetId() == 0x200)
     {
       uint8_t data[8] = {0};
       uint8_t data_index = 0;
@@ -442,6 +493,11 @@ void dataToOled()
         data[data_index] = CAN.read();
         data_index++;
       }
+
+      uint32_t direciton = data[0];
+      uint32_t speed = (((uint16_t)data[1]) << 8) | data[0];
+
+      
     }
   }
 }
